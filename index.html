@@ -230,6 +230,17 @@ try{
   #whimsCard .wcAdd input:focus-visible{outline:none;border-color:var(--wh-blue-glow);
     box-shadow:0 0 0 3px rgba(126,155,255,.18)}
   #whimsCard .wcNote{font-size:10.5px;color:var(--mute);line-height:1.6}
+  #whimsCard .wcLinkResults{margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:210px;overflow:auto}
+  #whimsCard .wcLinkRow{text-align:left;width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);
+    background:rgba(12,18,38,.7);color:var(--text);font-size:11.5px;line-height:1.4}
+  #whimsCard .wcLinkRow b{color:var(--wh-blue-glow);margin-right:6px}
+  #whimsCard .wcLinkRow span{display:block;font-size:10px;color:var(--mute);margin-top:2px;letter-spacing:.06em}
+  .srcBtn{flex:1;font-size:11px;padding:9px 5px}
+  .srcBtn.active{border-color:var(--wh-blue-glow)!important;color:var(--wh-blue-glow)!important;background:rgba(126,155,255,.10)}
+  button.armed{border-color:var(--wh-red-glow)!important;color:var(--wh-red-glow)!important;
+    background:rgba(194,31,53,.14)!important;box-shadow:0 0 0 2px rgba(194,31,53,.30)!important;
+    animation:armPulse .9s ease-in-out infinite}
+  @keyframes armPulse{0%,100%{opacity:1}50%{opacity:.7}}
   /* whims panel extras */
   #whimsPanel input[type=password]{width:100%;padding:11px 12px;background:var(--ink);
     border:1px solid rgba(138,150,196,.35);border-radius:10px;color:var(--text);
@@ -368,6 +379,15 @@ try{
     <h2>WHIMS LIVE</h2>
     <div class="sub">Connect to your WHIMS Google Sheet to see live stock for any code you search, add found bottles straight to inventory, and flag low stock for reorder.</div>
     <div id="whimsStatus"></div>
+    <div class="whimsAuthOnly" id="srcWrap">
+      <label style="display:block;font-size:9.5px;color:var(--mute);letter-spacing:.12em;margin:12px 0 4px">SCANNER &amp; SEARCH USE</label>
+      <div class="row" style="gap:6px;margin-top:0">
+        <button class="ghost srcBtn" data-src="whims">WHIMS LIST</button>
+        <button class="ghost srcBtn" data-src="orders">ON-ORDER</button>
+        <button class="ghost srcBtn" data-src="excel">EXCEL LIST</button>
+      </div>
+      <div class="sub" id="srcNote" style="margin-top:6px"></div>
+    </div>
     <label for="whimsApi" class="whimsLoginField">WEB APP URL</label>
     <input type="url" id="whimsApi" class="whimsLoginField" placeholder="https://script.google.com/…/exec" autocapitalize="none">
     <label for="whimsUser" class="whimsLoginField">USERNAME</label>
@@ -563,7 +583,8 @@ async function scanLoop(){
   setTimeout(scanLoop,90);
 }
 function register(raw,pts){
-  const code=(raw||'').trim().toUpperCase(); if(!DB[code])return;
+  const code=(raw||'').trim().toUpperCase();
+  if(!DB[code]&&!(whimsTokenValid()&&activeScanSource()!=='excel'))return;
   let cx,cy;
   if(Array.isArray(pts)){cx=pts.reduce((a,p)=>a+p.x,0)/pts.length;cy=pts.reduce((a,p)=>a+p.y,0)/pts.length;}
   else{cx=pts.x+pts.width/2;cy=pts.y+pts.height/2;}
@@ -650,16 +671,18 @@ function draw(){
     }
   }
 
-  for(const[code,t]of tags){
+  let _ord=[...tags];
+  if(findTarget)_ord.sort((a,b)=>(a[0]===findTarget?1:0)-(b[0]===findTarget?1:0)); // target drawn last = front
+  for(const[code,t]of _ord){
     t.x+=(t.tx-t.x)*.32;t.y+=(t.ty-t.y)*.32;
-    const m=DB[code],age=now-t.seen,
+    const m=DB[code]||{n:code,p:'',s:''},age=now-t.seen,
       fade=Math.min(1,(now-t.born)/180)*(1-Math.max(0,(age-450)/350));
     const isTarget=findTarget===code,isPop=code===popCode&&!findTarget;
     t.pop+=(((isPop||isTarget)?1:0)-t.pop)*.18;
     const P=t.pop,bob=Math.sin(now/600+t.born)*2.5*S;
 
     // lift scales with screen so label clears the ring on all sizes
-    const lift=(50+P*22)*S+bob;
+    const lift=((isTarget?70:50)+P*22)*S+bob;
 
     ctx.globalAlpha=fade*(findTarget&&!isTarget?.25:1);
     const col=isTarget?'#ff6b7d':'#8fb4ff';
@@ -670,10 +693,10 @@ function draw(){
     if(isTarget){
       const pulse=(now/700)%1;
       ctx.save();ctx.globalAlpha=fade*(1-pulse);
-      ctx.beginPath();ctx.arc(t.x,t.y,(12+pulse*24)*S,0,7);ctx.stroke();ctx.restore();
-      ctx.beginPath();ctx.arc(t.x,t.y,12*S,0,7);ctx.stroke();
-      ctx.font=`700 ${9*S}px ui-monospace,monospace`;ctx.fillStyle=col;
-      ctx.fillText('● FOUND HERE',t.x+16*S,t.y+3.5*S);
+      ctx.beginPath();ctx.arc(t.x,t.y,(18+pulse*30)*S,0,7);ctx.stroke();ctx.restore();
+      ctx.beginPath();ctx.arc(t.x,t.y,18*S,0,7);ctx.stroke();
+      ctx.font=`700 ${11*S}px ui-monospace,monospace`;ctx.fillStyle=col;
+      ctx.fillText('● FOUND HERE',t.x+22*S,t.y+4*S);
       if(!t._buzzed){t._buzzed=true;if(navigator.vibrate)navigator.vibrate([60,40,60]);}
     }else{
       ctx.beginPath();ctx.arc(t.x,t.y,ringR,0,7);ctx.stroke();
@@ -684,7 +707,7 @@ function draw(){
 
     // ── label ─────────────────────────────────────────────────────────────────
     // Font scales with screen; slightly smaller at low-pop to avoid clutter
-    const fs=(P>.5?11.5:10)*S;
+    const fs=(isTarget?16:(P>.5?11.5:10))*S;
     ctx.font=`${fs}px ui-monospace,Menlo,monospace`;
 
     // Safe usable width: full canvas minus 2×edge margin
@@ -702,7 +725,7 @@ function draw(){
     }
 
     const line2=(m.p?('POT '+m.p):'')+(m.p&&m.s?'  ·  ':'')+(m.s||'');
-    const fsSmall=(9+vsc*0.8)*S;
+    const fsSmall=(isTarget?12.5:(9+vsc*0.8))*S;
 
     // Measure both lines at their own font sizes
     let w2=0;
@@ -715,7 +738,7 @@ function draw(){
     const w=Math.min(rawW,maxW);
 
     // Label box height: scales with vsc
-    const lineH=(P>.4&&line2?44:28)*S;
+    const lineH=(isTarget?(line2?58:40):(P>.4&&line2?44:28))*S;
 
     // Clamp position to all 4 edges
     let lx=Math.max(safeL,Math.min(t.x-w/2,safeR-w));
@@ -733,7 +756,7 @@ function draw(){
     ctx.beginPath();ctx.rect(lx+4*S,ly,w-8*S,lineH);ctx.clip();
     ctx.fillStyle=isTarget?'#ffd2d8':'#eef3ff';
     ctx.font=`${fs}px ui-monospace,Menlo,monospace`;
-    ctx.fillText(nm,lx+10*S,ly+(17+P*2)*S);
+    ctx.fillText(nm,lx+10*S,ly+(isTarget?23:17+P*2)*S);
     if(P>.4&&line2){
       ctx.font=`${fsSmall}px ui-monospace,monospace`;
       ctx.fillStyle=col;ctx.fillText(line2,lx+10*S,ly+lineH-8*S);
@@ -815,8 +838,9 @@ $('xlLoad').onclick=()=>{
       if(!data){$('xlErr').textContent='No code+name columns found. Headers must mention ID/CODE and NAME.';return;}
       try{localStorage.setItem(LS_IMPORT,JSON.stringify({replace:importMode==='replace',data}));}
       catch(err){$('xlErr').textContent='List too large to store on phone ('+Object.keys(data).length+' rows). It is loaded for this session only.';
-        if(importMode==='replace'){DB={};}Object.assign(DB,data);updateDbInfo();return;}
+        if(importMode==='replace'){DB={};}Object.assign(DB,data);updateDbInfo();localStorage.setItem(LS_SCAN_SRC,'excel');syncSrcButtons();return;}
       loadDB();
+      localStorage.setItem(LS_SCAN_SRC,'excel');applyScanSource();
       $('importPanel').classList.remove('show');
       toast('✓ '+Object.keys(data).length.toLocaleString()+' medicines loaded from “'+sheetName+'” ('+importMode+')');
     }catch(err){$('xlErr').textContent='Could not read file: '+err.message;}
@@ -824,7 +848,7 @@ $('xlLoad').onclick=()=>{
   rd.readAsArrayBuffer(f);
 };
 $('xlReset').onclick=()=>{if(confirm('Remove imported list and return to the built-in database?')){
-  localStorage.removeItem(LS_IMPORT);loadDB();toast('✓ Built-in database restored');}};
+  localStorage.removeItem(LS_IMPORT);localStorage.setItem(LS_SCAN_SRC,'excel');applyScanSource();toast('✓ Built-in database restored');}};
 
 /* ================= GOOGLE SHEET SYNC ================= */
 $('navSync').onclick=()=>{$('sheetUrl').value=localStorage.getItem(LS_SHEET)||'';openSheet('syncPanel');};
@@ -861,6 +885,7 @@ if(localStorage.getItem(LS_SHEET)){
 const LS_WHIMS_API='whims_api', LS_WHIMS_TOKEN='whims_token',
       LS_WHIMS_USER='whims_user', LS_WHIMS_EXP='whims_token_exp',
       LS_WHIMS_DATA='whims_stock_data', LS_WHIMS_SYNCED='whims_stock_synced';
+const LS_SCAN_SRC='whims_scan_src';   // which dataset feeds the scanner & search
 let WHIMS_STOCK={};
 try{WHIMS_STOCK=JSON.parse(localStorage.getItem(LS_WHIMS_DATA)||'{}');}catch(e){}
 
@@ -931,9 +956,13 @@ async function whimsSync(){
   try{
     const list=await whimsCall('inventory');
     WHIMS_STOCK={};
-    list.forEach(it=>{if(it.id)WHIMS_STOCK[String(it.id).trim().toUpperCase()]=it;});
+    list.forEach(it=>{
+      if(it.id)WHIMS_STOCK[String(it.id).trim().toUpperCase()]=it;
+      if(it.barcode)String(it.barcode).split(/[,;\s]+/).forEach(bc=>{bc=bc.trim().toUpperCase();if(bc)WHIMS_STOCK[bc]=it;});
+    });
     try{localStorage.setItem(LS_WHIMS_DATA,JSON.stringify(WHIMS_STOCK));}catch(e){}
     localStorage.setItem(LS_WHIMS_SYNCED,String(Date.now()));
+    applyScanSource();
     whimsRefreshPanel();
     toast('✓ Synced '+list.length.toLocaleString()+' items from WHIMS');
     if(findTarget)showWhimsCard(findTarget);
@@ -950,6 +979,7 @@ function whimsRefreshPanel(){
   $('whimsStatus').innerHTML=loggedIn
     ?('Logged in as <b>'+esc(user||'')+'</b>.'+(synced?(' '+Object.keys(WHIMS_STOCK).length.toLocaleString()+' items synced '+timeAgo(synced)+'.'):' Tap “Sync Stock Now” to load live data.'))
     :'Not connected. Enter your WHIMS Web App URL and log in.';
+  syncSrcButtons();
 }
 
 function hideWhimsCard(){$('whimsCard').classList.remove('show');$('whimsCard').innerHTML='';}
@@ -961,8 +991,19 @@ function showWhimsCard(code){
   if(!it){
     card.className='show';
     card.innerHTML='<div class="wcNote">'+esc(code)+' is not tracked in the WHIMS inventory.</div>'+
-      (loggedIn?'<div class="row"><button class="primary" id="wcNewBtn">+ ADD TO WHIMS INVENTORY</button></div>':'');
-    if(loggedIn)$('wcNewBtn').onclick=()=>openWhimsNewPanel(code);
+      (loggedIn?('<div class="row"><button class="primary" id="wcNewBtn">＋ ADD AS NEW MEDICINE</button></div>'+
+        '<div class="row"><button class="ghost" id="wcLinkBtn" style="border-color:var(--wh-blue-glow)!important;color:var(--wh-blue-glow)">🔗 LINK TO AN EXISTING MEDICINE</button></div>'+
+        '<div class="wcAdd" id="wcLinkForm">'+
+        '<label for="wcLinkQ">FIND THE MEDICINE THIS BOTTLE BELONGS TO</label>'+
+        '<input type="text" id="wcLinkQ" autocapitalize="characters" placeholder="name or id — e.g. ABROMA or MT003">'+
+        '<div id="wcLinkResults" class="wcLinkResults"></div></div>'):
+        '<div class="wcNote" style="margin-top:8px">Log in to WHIMS Live (⇄ WHIMS) to add or link this code.</div>');
+    if(loggedIn){
+      $('wcNewBtn').onclick=()=>openWhimsNewPanel(code);
+      $('wcLinkBtn').onclick=()=>{const f=$('wcLinkForm');f.classList.toggle('show');
+        if(f.classList.contains('show')){$('wcLinkQ').value='';renderLinkResults(code,'');$('wcLinkQ').focus();}};
+      $('wcLinkQ').oninput=()=>renderLinkResults(code,$('wcLinkQ').value);
+    }
     return;
   }
   const sc=whimsStatusClass(it.status);
@@ -976,13 +1017,24 @@ function showWhimsCard(code){
     '<span class="stepVal">'+it.priority+'</span>'+
     (loggedIn?'<button class="stepBtn" data-pri="1">+</button>':'')+'</div>';
   if(loggedIn){
-    html+='<div class="row"><button class="primary" id="wcAddBtn">+ ADD FOUND STOCK</button></div>'+
+    const onOrder=Number(it.priority)>0;
+    html+='<div class="row"><button class="'+(onOrder?'ghost':'primary')+'" id="wcOrderBtn"'+
+      (onOrder?' style="border-color:var(--wh-red-glow)!important;color:var(--wh-red-glow)"':'')+'>'+
+      (onOrder?('✓ ON ORDER LIST · P'+it.priority+' — TAP TO REMOVE'):'🛒 ADD TO ORDER LIST')+'</button></div>';
+    html+='<div class="row" style="gap:8px">'+
+      '<button class="primary" id="wcAddBtn">＋ STOCK</button>'+
+      '<button class="ghost" id="wcDispBtn" style="border-color:var(--wh-red-glow)!important;color:var(--wh-red-glow)">− DISPENSE</button></div>'+
       '<div class="wcAdd" id="wcAddForm">'+
       '<label for="wcBottles">BOTTLES FOUND</label><input type="number" id="wcBottles" min="1" step="1" inputmode="decimal">'+
       '<label for="wcMl">ML (optional)</label><input type="number" id="wcMl" min="0" step="1" inputmode="decimal">'+
       '<label for="wcRemarks">REMARKS (optional)</label><input type="text" id="wcRemarks">'+
       '<div class="row"><button class="ghost" id="wcAddCancel">CANCEL</button>'+
-      '<button class="primary" id="wcAddSave">SAVE</button></div></div>';
+      '<button class="primary" id="wcAddSave">SAVE</button></div></div>'+
+      '<div class="wcAdd" id="wcDispForm">'+
+      '<label for="wcDispBottles">BOTTLES TO DISPENSE</label><input type="number" id="wcDispBottles" min="1" step="1" inputmode="decimal" value="1">'+
+      '<label for="wcDispRemarks">REMARKS — patient / OPD no. (optional)</label><input type="text" id="wcDispRemarks">'+
+      '<div class="row"><button class="ghost" id="wcDispCancel">CANCEL</button>'+
+      '<button class="primary" id="wcDispSave">CONFIRM DISPENSE</button></div></div>';
   }else{
     html+='<div class="wcNote" style="margin-top:8px">Log in to WHIMS Live (⇄ WHIMS) to add stock or flag for reorder.</div>';
   }
@@ -1003,7 +1055,15 @@ function showWhimsCard(code){
   card.innerHTML=html;
   if(loggedIn){
     card.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>whimsAdjustPriority(code,parseInt(b.dataset.pri,10)));
+    $('wcOrderBtn').onclick=()=>{
+      const onOrder=Number(it.priority)>0;
+      armConfirm('wcOrderBtn',
+        onOrder?('✓ ON ORDER LIST · P'+it.priority+' — TAP TO REMOVE'):'🛒 ADD TO ORDER LIST',
+        onOrder?'✓ TAP AGAIN TO REMOVE FROM ORDER':'✓ TAP AGAIN TO CONFIRM ORDER',
+        ()=>whimsToggleOrder(code));
+    };
     $('wcAddBtn').onclick=()=>{
+      $('wcDispForm').classList.remove('show');
       $('wcAddForm').classList.add('show');
       const sugg=parsePackMl(it.pack);
       $('wcBottles').value='';$('wcMl').value='';$('wcRemarks').value='';
@@ -1013,6 +1073,13 @@ function showWhimsCard(code){
     };
     $('wcAddCancel').onclick=()=>$('wcAddForm').classList.remove('show');
     $('wcAddSave').onclick=()=>whimsReceive(code);
+    $('wcDispBtn').onclick=()=>{
+      $('wcAddForm').classList.remove('show');
+      const f=$('wcDispForm');f.classList.toggle('show');
+      if(f.classList.contains('show')){$('wcDispBottles').value='1';$('wcDispRemarks').value='';$('wcDispBottles').focus();$('wcDispBottles').select&&$('wcDispBottles').select();}
+    };
+    $('wcDispCancel').onclick=()=>$('wcDispForm').classList.remove('show');
+    $('wcDispSave').onclick=()=>whimsDispense(code);
   }
   if(RX_MODE){
     $('wcRxBtn').onclick=()=>{$('wcRxForm').classList.add('show');};
@@ -1047,6 +1114,116 @@ async function whimsAdjustPriority(code,delta){
   }catch(err){toast('Failed: '+err.message);}
 }
 
+async function whimsDispense(code){
+  const n=parseFloat($('wcDispBottles').value);
+  if(!n||n<=0){toast('Enter how many bottles to dispense.');return;}
+  const remarks=$('wcDispRemarks').value.trim();
+  const params={id:code,bottles:n};if(remarks)params.remarks=remarks;
+  const btn=$('wcDispSave');btn.textContent='DISPENSING…';btn.disabled=true;
+  try{
+    const r=await whimsCall('dispense',params,true);
+    toast('✓ Dispensed '+n+' · '+code+' stock '+r.prevStock+' → '+r.newStock);
+    await whimsSync();
+    if(wcShownCode===code||findTarget===code)showWhimsCard(code);
+  }catch(err){toast('Failed: '+err.message);if(btn){btn.textContent='CONFIRM DISPENSE';btn.disabled=false;}}
+}
+
+async function whimsToggleOrder(code){
+  const it=WHIMS_STOCK[code];if(!it)return;
+  const next=Number(it.priority)>0?0:3;
+  const btn=$('wcOrderBtn');if(btn){btn.disabled=true;}
+  try{
+    await whimsCall('priority',{id:code,priority:next},true);
+    toast(next>0?('✓ '+code+' added to order list (priority 3)'):('✓ '+code+' removed from order list'));
+    await whimsSync();
+    if(wcShownCode===code||findTarget===code)showWhimsCard(code);
+  }catch(err){toast('Failed: '+err.message);if(btn){btn.disabled=false;}}
+}
+
+/* link an untracked scanned code to an existing WHIMS medicine */
+function renderLinkResults(code,q){
+  const box=$('wcLinkResults');if(!box)return;
+  q=(q||'').trim().toUpperCase();
+  if(!q){box.innerHTML='<div class="wcNote">Type a name or id to find the medicine.</div>';return;}
+  const hits=[],seen=new Set();
+  for(const k in WHIMS_STOCK){
+    const it=WHIMS_STOCK[k];if(!it||seen.has(it.id))continue;
+    if(String(it.id).toUpperCase().includes(q)||String(it.name).toUpperCase().includes(q)){
+      seen.add(it.id);hits.push(it);if(hits.length>=12)break;}
+  }
+  if(!hits.length){box.innerHTML='<div class="wcNote">No match — try a shorter search.</div>';return;}
+  box.innerHTML=hits.map(it=>'<button class="wcLinkRow" data-id="'+esc(it.id)+'"><b>'+esc(it.id)+'</b> '+esc(it.name)+
+    '<span>'+esc(it.status||'')+' · '+it.bottles+' btl</span></button>').join('');
+  box.querySelectorAll('.wcLinkRow').forEach(b=>b.onclick=()=>whimsLinkCode(code,b.dataset.id));
+}
+async function whimsLinkCode(code,targetId){
+  const it=WHIMS_STOCK[String(targetId).toUpperCase()];const nm=it?it.name:targetId;
+  if(!confirm('Link scanned code '+code+' to "'+nm+'"?\nFuture scans of this code will open '+nm+'.'))return;
+  try{
+    await whimsCall('setcode',{id:targetId,code},true);
+    whimsRegisterLocalCode(code,nm,it&&(it.potency||it.p)||'',it&&it.pack||'');
+    toast('✓ '+code+' linked to '+nm);
+    await whimsSync();
+    showWhimsCard(code);
+  }catch(err){toast('Link failed: '+err.message);}
+}
+
+/* make a code immediately scannable on THIS device (name floats + card opens) */
+function whimsRegisterLocalCode(code,name,pot,pack){
+  code=String(code||'').trim().toUpperCase();if(!code)return;
+  CUSTOM[code]={n:name||code,p:pot||'',s:pack||''};DB[code]=CUSTOM[code];
+  try{localStorage.setItem(LS_CUSTOM,JSON.stringify(CUSTOM));}catch(e){}
+  updateDbInfo();
+}
+
+/* ---- two-tap confirmation: first tap arms, second tap commits ---- */
+function armConfirm(id,normalText,armedText,onConfirm){
+  const b=$(id);if(!b)return;
+  if(b.dataset.armed==='1'){b.dataset.armed='0';b.classList.remove('armed');clearTimeout(b._ct);onConfirm();return;}
+  b.dataset.armed='1';b.classList.add('armed');b.textContent=armedText;
+  if(navigator.vibrate)navigator.vibrate(20);
+  clearTimeout(b._ct);b._ct=setTimeout(()=>{b.dataset.armed='0';b.classList.remove('armed');b.textContent=normalText;},5000);
+}
+
+/* ---- scanner / search data source: WHIMS list · on-order only · uploaded Excel ---- */
+function activeScanSource(){
+  const s=localStorage.getItem(LS_SCAN_SRC);
+  if(s)return s;
+  return (whimsTokenValid()&&Object.keys(WHIMS_STOCK).length)?'whims':'excel';
+}
+function applyScanSource(){
+  const src=activeScanSource();
+  if((src==='whims'||src==='orders')&&Object.keys(WHIMS_STOCK).length){
+    DB={};
+    for(const k in WHIMS_STOCK){
+      const it=WHIMS_STOCK[k];if(!it||!it.id)continue;
+      if(src==='orders'&&!(Number(it.priority)>0))continue;
+      const rec={n:it.name,p:it.potency||'',s:it.pack||''};
+      DB[String(it.id).trim().toUpperCase()]=rec;
+      if(it.barcode)String(it.barcode).split(/[,;\s]+/).forEach(bc=>{bc=bc.trim().toUpperCase();if(bc)DB[bc]=rec;});
+    }
+    updateDbInfo();
+  }else{
+    loadDB(); // excel / built-in / custom — also the fallback before the first sync
+  }
+  syncSrcButtons();
+}
+function syncSrcButtons(){
+  const src=activeScanSource(),n=Object.keys(DB).length;
+  document.querySelectorAll('.srcBtn').forEach(b=>b.classList.toggle('active',b.dataset.src===src));
+  const note=$('srcNote');if(!note)return;
+  note.textContent=src==='whims'?('Live WHIMS list — '+n.toLocaleString()+' codes. Refreshes on every sync.')
+    :src==='orders'?('Only medicines on order — '+n.toLocaleString()+' codes.')
+    :('Uploaded Excel / built-in list — '+n.toLocaleString()+' codes.');
+}
+document.querySelectorAll('.srcBtn').forEach(b=>b.onclick=()=>{
+  const v=b.dataset.src;
+  if((v==='whims'||v==='orders')&&!Object.keys(WHIMS_STOCK).length){toast('Sync WHIMS stock first.');return;}
+  localStorage.setItem(LS_SCAN_SRC,v);applyScanSource();
+  toast('Scanner data → '+({whims:'WHIMS list',orders:'On-order only',excel:'Excel list'}[v]));
+});
+applyScanSource(); // honour the saved/default source at boot (WHIMS_STOCK persists across sessions)
+
 $('navWhims').onclick=()=>{whimsRefreshPanel();openSheet('whimsPanel');};
 $('whimsLoginBtn').onclick=whimsLogin;
 $('whimsSyncBtn').onclick=whimsSync;
@@ -1064,6 +1241,7 @@ function openWhimsNewPanel(code){
   $('wnBottles').value='';$('wnMl').value='';$('wnPriority').value='';
   $('wnSupplier').value='';$('wnCost').value='';$('wnRemarks').value='';
   $('wnErr').textContent='';
+  $('wnSave').dataset.armed='0';$('wnSave').classList.remove('armed');$('wnSave').textContent='ADD ITEM';
   $('wnBottles').oninput=()=>{
     const sugg=parsePackMl($('wnPack').value),b=parseFloat($('wnBottles').value)||0;
     $('wnMl').value=(sugg&&b)?Math.round(sugg*b):'';
@@ -1085,6 +1263,7 @@ async function whimsAddItem(){
   $('wnErr').textContent='';$('wnSave').textContent='ADDING\u2026';$('wnSave').disabled=true;
   try{
     await whimsCall('additem',params,true);
+    whimsRegisterLocalCode(code,name,$('wnPotency').value.trim(),$('wnPack').value.trim());
     $('whimsNewPanel').classList.remove('show');
     toast('\u2713 '+code+' added to WHIMS inventory');
     await whimsSync();
@@ -1092,7 +1271,14 @@ async function whimsAddItem(){
   }catch(err){$('wnErr').textContent=err.message;}
   finally{$('wnSave').textContent='ADD ITEM';$('wnSave').disabled=false;}
 }
-$('wnSave').onclick=whimsAddItem;
+function validateNew(){
+  const name=$('wnName').value.trim();
+  const bottles=parseFloat($('wnBottles').value);
+  if(!name){$('wnErr').textContent='Medicine name is required.';return false;}
+  if(isNaN(bottles)||bottles<0){$('wnErr').textContent='Enter a starting bottle count (0 or more).';return false;}
+  $('wnErr').textContent='';return true;
+}
+$('wnSave').onclick=()=>{ if(!validateNew())return; armConfirm('wnSave','ADD ITEM','✓ TAP AGAIN TO FINALIZE',whimsAddItem); };
 
 /* ================= Rx / PMS INTEGRATION ================= */
 // HoloScan enters "prescription mode" when opened with ?rx=1 (typically via
